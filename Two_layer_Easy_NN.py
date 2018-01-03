@@ -1,56 +1,108 @@
-import sys,os
 import numpy as np
+from function import *
+from layers import *
+from collections import OrderedDict
 
 class TwoLayerEasyNet:
 
-    def __init__(self,input_size,hidden_size,output_size,weight_init_std=1/1.732):
+    def __init__(self, input_size, hidden_size, output_size, weight_init_std=1/1.732):
         #重み初期化
-        self.params={}
-        self.params['W1']=weight_init_std*np.random.randn(input_size,hidden_size)
-        self.params['b1']=np.zeros(hidden_size)
-        self.params['W2']=weight_init_std*np.random.randn(hidden_size,output_size)
-        self.params['b2']=np.zeros(output_size)
+        self.params = {}
+        self.params['W1'] = weight_init_std*np.random.randn(input_size, hidden_size)
+        self.params['b1'] = np.zeros(hidden_size)
+        self.params['W2'] = weight_init_std*np.random.randn(hidden_size, output_size)
+        self.params['b2'] = np.zeros(output_size)
 
-    def predict(self,x):
-        W1,W2=self.params['W1'],self.params['W2']
-        b1,b2=self.params['b1'],self.params['b2']
+        #レイヤの生成
+        self.layers = OrderedDict()
+        self.layers['Affine1'] = Affine(self.params['W1'], self.params['b1'])
+        self.layers['Relu1'] = Relu()
+        self.layers['Affine2'] = Affine(self.params['W2'], self.params['b2'])
+        self.lastLayer = SoftmaxWithLoss()
 
-        a1=np.dot(x,W1)+b1
-        z1=self.sigmoid(a1)
-        a2=np.dot(z1,W2)+b2
-        y=self.softmax(a2)
+    def predict(self, x):
+        for layer in self.layers.values():#value:オブジェクトをlayerに代入してる
+            x = layer.forward(x)
 
-        return y
-
-    def sigmoid(self,x):
-        return 1/(1+np.exp(-x))
-
-    def softmax(self,x):#x(241, 3) x.ndim=2,x.T(3,241)
-        if x.ndim == 2:#なぜ転置にしたか全然わからん！！！
-            x = x.T
-            x = x - np.max(x, axis=0)#列方向
-            y = np.exp(x) / np.sum(np.exp(x), axis=0)
-            return y.T
-
-        x = x - np.max(x) # オーバーフロー対策
-        return np.exp(x) / np.sum(np.exp(x))
+        return x
 
 
 
 
+    def accuracy(self, x, t):
+        y = self.predict(x)
+        y = np.argmax(y, axis=1)#列方向
+        t = np.argmax(t, axis=1)
 
-    def accuracy(self,x,t):
-        y=self.predict(x)
-        y=np.argmax(y,axis=1)
-
-
-
-###sigmoid()は当然n次元に対応している。
-# abc=[[[0,2,3],[4,5,6]],[[0,2,3],[4,5,6]]]
-# abc=np.array(abc)
-# print(sigmoid(abc))
+        accuraccy = np.sum(y == t)/float(x.shape[0])
+        return accuraccy
 
 
+    def loss(self, x, t):
+        y = self.predict(x)
+        return self.lastLayer.forward(y, t)
+
+
+
+    def numerical_gradient(self,x,t):#fはCross_Entropy_Error，xは重みW
+        loss_W=lambda W : self.loss(x,t)
+        grads={}
+        grads['W1']=num_grad_func(loss_W,self.params['W1'])
+        grads['b1']=num_grad_func(loss_W,self.params['b1'])
+        grads['W2']=num_grad_func(loss_W,self.params['W2'])
+        grads['b2']=num_grad_func(loss_W,self.params['b2'])
+        return grads
+
+    def gradient(self, x, t):
+        #forward
+        self.loss(x,t)
+
+        #backward
+        dout = 1
+        dout = self.lastLayer.backward(dout)
+
+        layers = list(self.layers.values())
+        layers.reverse()#listクラスのメソッド
+        for layer in layers:
+            dout = layer.backward(dout)
+
+        #勾配の設定
+        grads = {}
+        grads['W1']=self.layers['Affine1'].dW
+        grads['b1']=self.layers['Affine1'].db
+        grads['W2']=self.layers['Affine2'].dW
+        grads['b2']=self.layers['Affine2'].db
+
+        return grads
+
+
+# # lambda関数のお勉強
+# x=1
+# t=2
+# loss_W=lambda W: x*2+t*2#Wは何の数字でもよい。Wの値に関わらず、loss_Wはきまる
+# print(loss_W((0,0)))
+
+"""
+def numerical_gradient(f, x):
+    h = 1e-4 # 0.0001
+    grad = np.zeros_like(x)
+    
+    it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
+    while not it.finished:
+        idx = it.multi_index
+        tmp_val = x[idx]
+        x[idx] = float(tmp_val) + h
+        fxh1 = f(x) # f(x+h)
+        
+        x[idx] = tmp_val - h 
+        fxh2 = f(x) # f(x-h)
+        grad[idx] = (fxh1 - fxh2) / (2*h)
+        
+        x[idx] = tmp_val # 値を元に戻す
+        it.iternext()   
+        
+    return grad
+"""
 
     
 
@@ -88,4 +140,14 @@ def cross_entropy_error(y, t):
              
     batch_size = y.shape[0]#y.shape:(241,2)
     return -np.sum(np.log(y[np.arange(batch_size), t])) / batch_size#y[241,2]*t[241,2]t=1となる列のyの和を求めればいい
+    # def predict(self, x):
+    #     W1, W2 = self.params['W1'], self.params['W2']
+    #     b1, b2 = self.params['b1'], self.params['b2']
+
+    #     a1 = np.dot(x, W1)+b1
+    #     z1 = sigmoid(a1)
+    #     a2 = np.dot(z1, W2)+b2
+    #     y = softmax(a2)
+
+    #     return y
 """
